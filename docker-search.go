@@ -4,11 +4,15 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io/ioutil"
+	"log"
 	"os"
 	"os/user"
 	"path"
 	"strconv"
 	"strings"
+	"sync"
+	// "github.com/x0rzkov/itask"
 )
 
 func help() {
@@ -60,6 +64,10 @@ UpdateCheck = true
 		rv = true
 	}
 	return rv
+}
+
+type Search struct {
+	Keywords []string `json:"keywords"`
 }
 
 type filters []string
@@ -114,19 +122,47 @@ func main() {
 		if "" == flag.Arg(0) {
 			help()
 		} else {
+
+			// Open our jsonFile
+			filePath := "search-terms.json"
+			jsonFile, err := os.Open(filePath)
+			// if we os.Open returns an error then handle it
+			if err != nil {
+				fmt.Println(err)
+			}
+			fmt.Println("Successfully Opened file: ", filePath)
+			// defer the closing of our jsonFile so that we can parse it later on
+			defer jsonFile.Close()
+
+			byteValue, _ := ioutil.ReadAll(jsonFile)
+
+			var search Search
+			err = json.Unmarshal(byteValue, &search)
+			if err != nil {
+				log.Fatalf("cannot unmarshal data: %v\n", err)
+			}
+
+			// pp.Println(search.Keywords)
+			// os.Exit(1)
+
 			rwc := new(RealWebClient)
 			c := new(Client)
+			c.Storage("./data/docker-search")
 			c.Http = rwc
 
 			if c.LoadConfig(getConfigFilePath()) {
 				c.Verbose = *verbose
 				count := 0
-				ch := make(chan string, 3)
-				for _, q := range flag.Args() {
-					go query(c, q, ch) //  c.Query(
-					//  flag.Arg(0) )
+				wg := &sync.WaitGroup{}
+				ch := make(chan string, 1)
+
+				// task := itask.NewTask()
+				for _, q := range search.Keywords {
+					wg.Add(1)
+					go query(c, q, ch)
 					count++
 				}
+				wg.Wait()
 
 				if *annotation {
 					for count > 0 {
@@ -198,6 +234,10 @@ func printResults(c *Client) {
 		fmt.Println(fmt.Sprintf(tableFmt, "Name", "Description"))
 		fmt.Println(fmt.Sprintf(tableFmt, "----", "-----------"))
 		for _, r := range c.Results {
+			if err := c.Index(r.Name, r.Description); err != nil {
+				log.Println("r.Name", r.Name, "r.Description", r.Description)
+				log.Fatalln("index error", err)
+			}
 			fmt.Println(fmt.Sprintf(tableFmt, r.Name, r.Description))
 		}
 

@@ -8,8 +8,11 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	// "sync"
+	"time"
 
 	"github.com/BurntSushi/toml"
+	badger "github.com/dgraph-io/badger"
 	"github.com/k0kubun/pp"
 )
 
@@ -18,7 +21,9 @@ type WebClient interface {
 }
 
 type Client struct {
-	config      *Config
+	config *Config
+	store  *badger.DB
+	// lock        *sync.RWLock
 	dockerfiles map[string]string
 	Images      []DockerImage
 	Results     []DockerImage
@@ -32,6 +37,18 @@ type Docker struct {
 
 func (c *Client) Load(files map[string]string) {
 	c.dockerfiles = files
+}
+
+func (c *Client) Storage(storagePath string) error {
+	// Open the Badger database located in the /tmp/badger directory.
+	// It will be created if it doesn't exist.
+	store, err := badger.Open(badger.DefaultOptions(storagePath))
+	if err != nil {
+		return err
+	}
+	// defer db.Close()
+	c.store = store
+	return nil
 }
 
 type Config struct {
@@ -102,6 +119,13 @@ func (c *Client) processDockerfile(ci <-chan Tuple) {
 			c.Images[i].Dockerfile = strings.TrimSpace(html.UnescapeString(tuple.Dockerfile))
 		}
 	}
+}
+
+func (c *Client) Index(key, value string) error {
+	return c.store.Update(func(txn *badger.Txn) error {
+		err := txn.Set([]byte(key), []byte(value))
+		return err
+	})
 }
 
 func (c *Client) Annotate() {
@@ -220,6 +244,7 @@ func (c *Client) Query(term string) bool {
 	for currentPage <= lastPage {
 		url := c.config.Host + c.config.Endpoint + "?q=" + term + "&page=" + fmt.Sprintf("%d", currentPage)
 		pp.Println(url)
+		time.Sleep(3 * time.Second)
 		body := c.Http.Get(url)
 		var res DockerResults
 		err := json.Unmarshal(body, &res)
@@ -228,7 +253,8 @@ func (c *Client) Query(term string) bool {
 			c.Images = append(c.Images, res.Results...)
 			c.Results = append(c.Results, res.Results...)
 		} else {
-			log.Fatal(err)
+			fmt.Println(string(body))
+			log.Fatalln("error json", err)
 		}
 		currentPage++
 	}
