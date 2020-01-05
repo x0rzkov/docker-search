@@ -115,7 +115,7 @@ func main() {
 				err = store.Update(func(txn *badger.Txn) error {
 					log.Println("indexing dockerfile ", image)
 					// log.Println("dockerfile: \n", dockerfile.Contents)
-					err := txn.Set([]byte(image+"/dockerfile"), []byte(dockerfile.Contents))
+					err := txn.Set([]byte(image+"/dockerfile-content"), []byte(dockerfile.Contents))
 					return err
 				})
 				if err != nil {
